@@ -142,7 +142,7 @@ def is_physically_feasible(seq, catalogue_path):
                 a.remove(curr_dir)
                 a.remove(pitch_side)
                 if len(a) != 1:
-                    Error
+                    raise ValueError("len(a) must be equal to 1")
                 else:
                     width_side = a[0]
                 
@@ -395,7 +395,7 @@ class generate_sequences:
 
     def add_to_seq(self, current_sequence):
         """
-        Given an incoplete sequence format of length L,
+        Given an incomplete sequence format of length L,
         it returns all the valid sequence formats of length L+1
         """
         possible_seqs = []    

@@ -19,14 +19,14 @@ def loading_model(args, input_size, output_size, max_length):
     """
     encoder = EncoderGearFormer(input_size, args.dim , depth = args.depth).to(device)
     model_decoder = TransformerWrapper(
-    num_tokens = output_size,
-    max_seq_len = max_length,    # max_length is 19 + 2 (start and end), here I use max_length - 1(start), since we are already passing start to transformer
-    attn_layers = Decoder(
-        dim = args.dim,
-        depth = args.depth,
-        heads = args.head,
-        cross_attend = True
-        )
+                    num_tokens = output_size,
+                    max_seq_len = max_length,    # max_length is 19 + 2 (start and end), here I use max_length - 1(start), since we are already passing start to transformer
+                    attn_layers = Decoder(
+                        dim = args.dim,
+                        depth = args.depth,
+                        heads = args.head,
+                        cross_attend = True
+                    )
     )
     decoder = AutoregressiveWrapper(model_decoder, ignore_index=output_size-1).to(device)
 

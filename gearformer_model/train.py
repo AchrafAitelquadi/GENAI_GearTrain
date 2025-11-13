@@ -7,8 +7,8 @@ np.random.seed(0)
 import os
 import torch.optim as optim
 import torch.nn as nn
-from  utils.dataset import load_data
-from utils.config import config
+from utils.data_handle import load_data
+from utils.config_file import config
 from utils.helper import  get_coef
 from models.load_model import loading_model
 from models.transformers import train_gearformer, val_gearformer

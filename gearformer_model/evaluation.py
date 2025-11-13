@@ -1,15 +1,15 @@
 import torch
-from utils.dataset import load_data
+from utils.data_handle import load_data
 from decimal import Decimal as D
 from decimal import getcontext
 import csv
 from utils.helper import is_grammatically_correct, is_physically_feasible
-from utils.dataset import load_data, MyDataset
+from utils.data_handle import load_data, MyDataset
 from tqdm import tqdm
 from models.load_model import loading_model
 import os
 getcontext().prec = 5
-from utils.config import config
+from utils.config_file import config
 import random
 random.seed(0)
 import numpy as np
@@ -29,46 +29,90 @@ class Eval(load_data):
         self.output_size = output_size
 
     def get_output_sequence_accuracy(self, x_val, y_val, csvwriter):
-        correct = 0
         valid = 0
         grammar = 0
         
-        input_vec = x_val.clone().detach().to(torch.float32).cuda()
-        decoder_input = torch.zeros(self.output_size).cuda()
-        decoder_input[0] = 1
-        decoder_input = decoder_input.repeat(input_vec.shape[0], 1).cuda()
+        input_vec = x_val.to(torch.float32).cuda()
 
         with torch.no_grad():
                 
             encoded_input = self.encoder(input_vec)
+            # prompt = token <start> = index 0
             prompt = torch.zeros((len(y_val),1)).cuda()
             all_out = self.decoder.generate(prompts=prompt, context=encoded_input, seq_len=20)
 
         for inx in range(len(all_out)):
-            out = all_out[inx]
+            out_inx = all_out[inx].cpu().tolist()
+            out_tok = list(map(self.inx2name, out_inx))
 
-            out = list(map(self.inx2name, out.cpu().tolist()))
+            # Couper au token <end>
+            if "<end>" in out_tok:
+                end_pos = out_tok.index("<end>")
+                out_tok = out_tok[:end_pos + 1]
 
-            out.append("<end>")
-            target_inx = out.index("<end>")
-            out = out[:target_inx+1]
+            # Écrire dans CSV : 8 features + séquence générée
+            row = [float(x.item()) for x in input_vec[inx][:8]]
+            row.append(out_tok)
+            csvwriter.writerow(row)
 
 
-            csvwriter.writerow([input_vec[inx][0],input_vec[inx][1], input_vec[inx][2], input_vec[inx][3], input_vec[inx][4], input_vec[inx][5], input_vec[inx][6], input_vec[inx][7], out])
-
-
-            if is_grammatically_correct(self.args, ['<start>'] + out):
+            # Vérif grammaticale
+            seq = ['<start>'] + out_tok
+            if is_grammatically_correct(self.args, seq):
                 grammar += 1
-                if is_physically_feasible(['<start>'] + out, self.args.catalogue_path):
+
+                # Vérif physique
+                if is_physically_feasible(seq, self.args.catalogue_path):
                     valid += 1
-        return correct , valid, grammar
+
+        return valid, grammar
 
 
-    def accuracy(self, seq1, seq2):
-        seq2 = seq2[1:]
-        for i in range(len(seq1)):
-            if int(seq1[i]) != int(seq2[i]):
-                return False
-            if seq1[i] == 27:
-                break
-        return True
+
+        
+if __name__ == "__main__":
+    args = config()
+    max_length = 20
+    output_size = 53 # number of classes
+    with_weight = False
+    input_size = 8
+
+    csv_file_name = str(args.model_name)+"_EPOCH"+str(args.epoch)+"_BS"+str(args.BS)+"_WWL"+str(args.WWL)+"_lr"+str(args.lr)+".csv"
+    csvfile = open(csv_file_name, 'w', newline='')
+    csvwriter = csv.writer(csvfile)
+
+    encoder, decoder = loading_model(args, input_size, output_size, max_length)
+    encoder.load_state_dict(torch.load(os.path.join(args.checkpoint_path, args.encoder_chackpoint_name)))
+    decoder.load_state_dict(torch.load(os.path.join(args.checkpoint_path, args.decoder_chackpoint_name)))
+
+    """ ### This is to calculate the number of parameters:
+    pytorch_total_params = sum(p.numel() for p in encoder.parameters())
+    pytorch_total_params_t = sum(p.numel() for p in encoder.parameters() if p.requires_grad)
+    print("encoder:", pytorch_total_params, pytorch_total_params_t)
+    pytorch_total_params = sum(p.numel() for p in decoder.parameters())
+    pytorch_total_params_t = sum(p.numel() for p in decoder.parameters() if p.requires_grad)
+    print("decoder:", pytorch_total_params, pytorch_total_params_t) """
+    
+    encoder.cuda().eval()
+    decoder.cuda().eval()
+
+    eval = Eval(args, output_size, args.model_name, encoder, decoder)
+
+    x_val, y_val, target_length, weight_val, _ = eval.get_all_data(True, with_weight)
+
+
+    val_loader = torch.utils.data.DataLoader(MyDataset(x_val, y_val, target_length, weight_val), batch_size=args.BS, shuffle=False, num_workers=0)
+    all_valid, all_grammar = 0, 0
+    dataset_length = len(y_val)
+
+    print("dataset_length:", len(y_val))
+
+    for x_val, y_val, target_length, _ in tqdm(val_loader):
+        valid, grammar = eval.get_output_sequence_accuracy(x_val, y_val, csvwriter)
+        all_valid += valid
+        all_grammar += grammar
+    
+    print(
+        "valid_ratio:", all_valid / dataset_length,
+        "grammar_ratio:", all_grammar / dataset_length
+    )
